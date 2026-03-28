@@ -10,7 +10,7 @@ Runs on Mac (MPS) / GPU (CUDA) / CPU fallback.
 - Python 3.10+
 - PyTorch
 - aiohttp
-
+- 24GB+ RAM
 ```bash
 pip install torch aiohttp numpy
 ```
