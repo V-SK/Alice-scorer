@@ -1,97 +1,66 @@
-# Alice-scorer
+# Alice Scorer
 
-Alice Protocol — Gradient Scoring Worker
-
-Standalone HTTP server for scoring gradients submitted by miners.
+Scoring worker for Alice Protocol. Validate gradients and earn ALICE tokens.
 
 ## Requirements
 
 - Python 3.10+
-- PyTorch 2.0+
 - 24GB+ RAM
-- Public IP with port 8090 accessible
+- Model weights + validation data (download from https://dl.aliceprotocol.org)
 
-## Installation
+## Quick Start
 
 ```bash
-git clone https://github.com/V-SK/Alice-scorer.git
-cd Alice-scorer
+# 1. Clone
+git clone https://github.com/V-SK/alice-scorer.git
+cd alice-scorer
+
+# 2. Install
 pip install -r requirements.txt
-```
 
-## Usage
+# 3. Stake (requires 5,000 ALICE)
+git clone https://github.com/V-SK/alice-wallet.git
+cd alice-wallet && python cli.py create
+python cli.py stake scorer 5000 --endpoint http://YOUR_PUBLIC_IP:8090
+cd ..
 
-```bash
-# CPU (推荐，比 MPS 更快)
+# 4. Download model + validation data
+mkdir -p model validation_data
+# wget https://dl.aliceprotocol.org/model/current_model.pt -O model/current_model.pt
+# wget https://dl.aliceprotocol.org/validation/validation_dir.tar.gz
+
+# 5. Run
 python scoring_server.py \
-  --model-version 0 \
-  --device cpu \
-  --ps-url https://ps.aliceprotocol.org \
+  --model-path ./model/current_model.pt \
+  --validation-dir ./validation_data \
   --port 8090
 ```
 
-## 关键参数
+## Parameters
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--model-version` | 0 | **必须为 0**（自动从 PS 检测） |
-| `--device` | cpu | 推荐 cpu（30s/评分），mps 实测更慢（50s） |
-| `--ps-url` | 无 | **必须指定** https://ps.aliceprotocol.org |
-| `--port` | 8090 | 监听端口 |
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `--model-path` | ✅ | - | Path to model weights (.pt file) |
+| `--validation-dir` | ✅ | - | Path to validation data directory |
+| `--port` | ❌ | 8090 | Server port |
+| `--host` | ❌ | 0.0.0.0 | Bind host |
+| `--device` | ❌ | cpu | Device (cpu/cuda/mps) |
+| `--model-version` | ❌ | auto | Model version number |
+| `--num-val-shards` | ❌ | 5 | Number of validation shards |
+| `--ps-url` | ❌ | https://ps.aliceprotocol.org | Parameter Server URL |
 
-## 自动模型更新
+## Staking
 
-Scorer 内置更新机制，每 5 分钟自动从 PS 检测版本：
+Minimum stake: **5,000 ALICE**
 
-- gap ≤ 10：delta patch（秒级，内存原位）
-- gap > 10：全量下载 fallback
+```bash
+python cli.py stake scorer 5000 --endpoint http://YOUR_PUBLIC_IP:8090
+```
 
-无需 crontab 或外部脚本。
+## Hardware
 
-## Staking as a Scorer
-
-1. 获取 ALICE 代币（测试网 ≥50，主网 ≥5000）
-2. 调用链上 `ProofOfGradient.stake_as_scorer(amount, endpoint)`
-3. 等待 PS 激活（通过 5 项检查后自动激活）
-
-激活检查：
-- 质押金额 ≥ MinScorerStake
-- `/health` 返回 200
-- RAM ≥ 24GB
-- 模型版本与 PS 一致
-- Honeypot 测试误差 < 10%
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | 健康检查 + 模型版本 |
-| `/score` | POST | 评分梯度提交 |
-| `/reload` | POST | 重载模型 |
-| `/scorer/heartbeat` | POST | PS 心跳 |
-
-## 重要提醒
-
-1. `--model-version` 必须是 0，不要硬编码版本号
-2. `--device` 推荐 cpu，MPS 实测更慢
-3. 不需要外部脚本，内置更新循环足够
-4. 公网 IP + 端口可达是必须的
-
-## License
-
-MIT
-
-## Staking Requirements
-
-To become a scorer, you must stake **5,000 ALICE** tokens.
-
-### Steps
-1. Get ALICE tokens from mining or exchange
-2. Call `stake_as_scorer(amount=5000)` extrinsic on Alice chain
-3. Start the scoring server with `--address YOUR_STAKED_ADDRESS`
-4. PS will automatically detect and activate your scorer
-
-### Hardware Requirements
-- 32GB RAM minimum (64GB recommended)
-- Apple Silicon (MPS) or NVIDIA GPU
-- Stable network connection to PS
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| RAM | 24GB | 64GB |
+| CPU | 8 cores | 16 cores |
+| GPU | Optional | MPS/CUDA |
