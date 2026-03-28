@@ -1,4 +1,4 @@
-# alice-scorer
+# Alice-scorer
 
 Alice Protocol — Gradient Scoring Worker
 
