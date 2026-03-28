@@ -80,3 +80,18 @@ Scorer 内置更新机制，每 5 分钟自动从 PS 检测版本：
 ## License
 
 MIT
+
+## Staking Requirements
+
+To become a scorer, you must stake **5,000 ALICE** tokens.
+
+### Steps
+1. Get ALICE tokens from mining or exchange
+2. Call `stake_as_scorer(amount=5000)` extrinsic on Alice chain
+3. Start the scoring server with `--address YOUR_STAKED_ADDRESS`
+4. PS will automatically detect and activate your scorer
+
+### Hardware Requirements
+- 32GB RAM minimum (64GB recommended)
+- Apple Silicon (MPS) or NVIDIA GPU
+- Stable network connection to PS
