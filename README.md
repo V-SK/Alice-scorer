@@ -42,7 +42,7 @@ python scoring_server.py \
 
 ## Staking as a Scorer
 
-1. Get ALICE tokens
+1. Get ALICE tokens #5000
 2. Call `ProofOfGradient.stake_as_scorer(amount, endpoint)` on the Alice chain
 3. Wait for PS to call `activate_scorer` (or contact the team)
 
