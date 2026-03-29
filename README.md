@@ -4,7 +4,7 @@ Scoring worker for Alice Protocol. Validate gradients and earn ALICE tokens.
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.8+
 - 24GB+ RAM
 - Model weights + validation data (download from https://dl.aliceprotocol.org)
 

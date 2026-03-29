@@ -1,7 +1,5 @@
 torch>=2.0.0
-transformers>=4.30.0
 numpy
 requests
-psutil
-substrate-interface>=1.7.0
 aiohttp>=3.8.0
+substrate-interface>=1.8.0
