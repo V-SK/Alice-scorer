@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple, Any
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 
 # --- aiohttp import (lightweight HTTP server) ---
@@ -72,6 +73,8 @@ NUM_VALIDATION_SHARDS = 5  # Use 5 of 50 for speed (configurable)
 FETCH_TIMEOUT = 30  # seconds to fetch gradient from storage
 SCORE_TIMEOUT = 120  # max seconds per scoring operation
 SAFE_MAX_SEQ_LEN = int(os.environ.get("ALICE_SAFE_MAX_SEQ_LEN", "2048"))
+VALIDATION_SEQ_LEN = int(os.environ.get("ALICE_VALIDATION_SEQ_LEN", "128"))
+VALIDATION_BATCHES_PER_SHARD = int(os.environ.get("ALICE_VALIDATION_BATCHES_PER_SHARD", "1"))
 
 
 # =============================================================================
@@ -344,20 +347,17 @@ def _compute_validation_loss(
     Uses FP32 for precision (even if model is FP16).
     """
     total_loss = 0.0
-    total_tokens = 0
-    loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
+    total_batches = 0
     configured_max_seq_len = int(
         getattr(getattr(model, "config", None), "max_position_embeddings", 2048)
         or 2048
     )
     max_seq_len = max(2, min(configured_max_seq_len, SAFE_MAX_SEQ_LEN))
-    stride = max(1, max_seq_len - 1)
-    if configured_max_seq_len != max_seq_len:
-        log.warning(
-            f"[VAL] clamped max_seq_len from {configured_max_seq_len} to {max_seq_len}"
-        )
-    else:
-        log.info(f"[VAL] using max_seq_len={max_seq_len}")
+    sample_seq_len = max(2, min(VALIDATION_SEQ_LEN, max_seq_len))
+    log.info(
+        f"[VAL] sample_seq_len={sample_seq_len} configured_max_seq_len={configured_max_seq_len} "
+        f"safe_max_seq_len={SAFE_MAX_SEQ_LEN} batches_per_shard={VALIDATION_BATCHES_PER_SHARD}"
+    )
 
     for shard_data in validation_shards:
         if isinstance(shard_data, torch.Tensor):
@@ -379,28 +379,26 @@ def _compute_validation_loss(
         log.info(f"[VAL] shard tensor shape={shard_shape} dtype={tokens.dtype}")
 
         if tokens.dim() == 1:
-            token_rows = [tokens]
+            token_rows = [tokens.reshape(-1)]
         elif tokens.dim() == 2:
-            token_rows = [row for row in tokens]
+            token_rows = [row.reshape(-1) for row in tokens]
         else:
             log.warning(f"[VAL] skipping unsupported shard shape={shard_shape}")
             continue
 
         for row in token_rows:
-            row = row.reshape(-1)
-            if row.numel() < 2:
+            if row.numel() <= sample_seq_len + 1:
                 continue
 
-            for start in range(0, row.numel() - 1, stride):
-                chunk = row[start:start + max_seq_len]
-                if chunk.numel() < 2:
+            for _ in range(VALIDATION_BATCHES_PER_SHARD):
+                max_start = max(1, row.numel() - sample_seq_len - 1)
+                start = int(torch.randint(0, max_start, (1,)).item())
+                chunk = row[start : start + sample_seq_len + 1]
+                if chunk.numel() < sample_seq_len + 1:
                     continue
 
-                input_ids = chunk.unsqueeze(0).to(device=device, dtype=torch.long)
-                if input_ids.shape[1] > SAFE_MAX_SEQ_LEN:
-                    raise RuntimeError(
-                        f"input_ids seq_len={input_ids.shape[1]} exceeds safe cap {SAFE_MAX_SEQ_LEN}"
-                    )
+                input_ids = chunk[:-1].unsqueeze(0).to(device=device, dtype=torch.long)
+                labels = chunk[1:].unsqueeze(0).to(device=device, dtype=torch.long)
                 outputs = model(input_ids, labels=None)
 
                 if isinstance(outputs, tuple):
@@ -411,20 +409,20 @@ def _compute_validation_loss(
                     logits = outputs
 
                 shift_logits = logits[..., :-1, :].contiguous().float()
-                shift_labels = input_ids[..., 1:].contiguous()
+                shift_labels = labels[..., 1:].contiguous()
 
-                loss = loss_fn(
+                loss = F.cross_entropy(
                     shift_logits.view(-1, shift_logits.size(-1)),
                     shift_labels.view(-1),
+                    ignore_index=-100,
                 )
-                num_tokens = shift_labels.numel()
-                total_loss += loss.item()
-                total_tokens += num_tokens
+                total_loss += float(loss.item())
+                total_batches += 1
 
-    if total_tokens == 0:
+    if total_batches == 0:
         return float("inf")
 
-    return total_loss / total_tokens
+    return total_loss / total_batches
 
 
 # =============================================================================
