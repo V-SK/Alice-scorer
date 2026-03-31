@@ -71,6 +71,7 @@ VALIDATION_SHARD_RANGE = (59951, 60000)  # 50 shards, indices 59951-60000
 NUM_VALIDATION_SHARDS = 5  # Use 5 of 50 for speed (configurable)
 FETCH_TIMEOUT = 30  # seconds to fetch gradient from storage
 SCORE_TIMEOUT = 120  # max seconds per scoring operation
+SAFE_MAX_SEQ_LEN = int(os.environ.get("ALICE_SAFE_MAX_SEQ_LEN", "2048"))
 
 
 # =============================================================================
@@ -120,7 +121,20 @@ def load_model(model_path: str, device: str) -> torch.nn.Module:
 
     elapsed = time.time() - t0
     param_count = sum(p.numel() for p in model.parameters()) / 1e9
+    configured_max_seq_len = int(
+        getattr(getattr(model, "config", None), "max_position_embeddings", 2048)
+        or 2048
+    )
+    if configured_max_seq_len < 2 or configured_max_seq_len > SAFE_MAX_SEQ_LEN:
+        log.warning(
+            f"[MODEL-CONFIG] max_position_embeddings={configured_max_seq_len} outside safe range; "
+            f"runtime validation window will clamp to {SAFE_MAX_SEQ_LEN}"
+        )
     log.info(f"Model loaded: {param_count:.1f}B params, {elapsed:.1f}s, device={device}")
+    log.info(
+        f"[MODEL-CONFIG] max_position_embeddings={configured_max_seq_len} "
+        f"safe_max_seq_len={SAFE_MAX_SEQ_LEN}"
+    )
     return model
 
 
@@ -175,10 +189,11 @@ def load_validation_shards(
                 "shard_id": shard_id,
                 "tokens": data,
             })
+            shape = tuple(data.shape) if isinstance(data, torch.Tensor) else None
             if shard_id is None:
-                log.info(f"Loaded validation shard: {sf.name}")
+                log.info(f"Loaded validation shard: {sf.name} shape={shape}")
             else:
-                log.info(f"Loaded validation shard: {sf.name} (id={shard_id})")
+                log.info(f"Loaded validation shard: {sf.name} (id={shard_id}) shape={shape}")
         except Exception as e:
             log.warning(f"Failed to load {sf}: {e}")
 
@@ -331,11 +346,18 @@ def _compute_validation_loss(
     total_loss = 0.0
     total_tokens = 0
     loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
-    max_seq_len = int(
+    configured_max_seq_len = int(
         getattr(getattr(model, "config", None), "max_position_embeddings", 2048)
         or 2048
     )
+    max_seq_len = max(2, min(configured_max_seq_len, SAFE_MAX_SEQ_LEN))
     stride = max(1, max_seq_len - 1)
+    if configured_max_seq_len != max_seq_len:
+        log.warning(
+            f"[VAL] clamped max_seq_len from {configured_max_seq_len} to {max_seq_len}"
+        )
+    else:
+        log.info(f"[VAL] using max_seq_len={max_seq_len}")
 
     for shard_data in validation_shards:
         if isinstance(shard_data, torch.Tensor):
@@ -353,11 +375,15 @@ def _compute_validation_loss(
         if not isinstance(tokens, torch.Tensor):
             continue
 
+        shard_shape = tuple(tokens.shape)
+        log.info(f"[VAL] shard tensor shape={shard_shape} dtype={tokens.dtype}")
+
         if tokens.dim() == 1:
             token_rows = [tokens]
         elif tokens.dim() == 2:
             token_rows = [row for row in tokens]
         else:
+            log.warning(f"[VAL] skipping unsupported shard shape={shard_shape}")
             continue
 
         for row in token_rows:
@@ -371,6 +397,10 @@ def _compute_validation_loss(
                     continue
 
                 input_ids = chunk.unsqueeze(0).to(device=device, dtype=torch.long)
+                if input_ids.shape[1] > SAFE_MAX_SEQ_LEN:
+                    raise RuntimeError(
+                        f"input_ids seq_len={input_ids.shape[1]} exceeds safe cap {SAFE_MAX_SEQ_LEN}"
+                    )
                 outputs = model(input_ids, labels=None)
 
                 if isinstance(outputs, tuple):
