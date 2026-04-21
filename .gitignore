@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+backups/
+models/
+data/
+*.pyc
+*.log
+*.pid
+*.bak*
+*.pre_*
+.pytest_cache/
+*.lock
