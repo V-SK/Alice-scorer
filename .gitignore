@@ -10,3 +10,11 @@ data/
 *.pre_*
 .pytest_cache/
 *.lock
+
+# Backup files created by operational scripts
+*.backup
+*.backup_*
+*.bak
+*.bak.*
+scoring_server.py.*.backup*
+scoring_server.py.*_backup_*
