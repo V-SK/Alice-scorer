@@ -507,9 +507,14 @@ class ScoringServer:
                 f"Model version mismatch: worker={self.model_version}, "
                 f"request={body['model_version']}"
             )
-            # Could return error or proceed with warning
-            # For Phase 1: proceed but flag it
-            # return web.json_response({"error": "model_version_mismatch"}, status=409)
+            return web.json_response(
+                {
+                    "error": "model_version_mismatch",
+                    "worker_model_version": self.model_version,
+                    "request_model_version": body["model_version"],
+                },
+                status=409,
+            )
 
         # --- Busy check (single worker, one score at a time) ---
         if self.busy:
